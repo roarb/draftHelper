@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Draft 2018</title>
+    <!-- load additional db objects here -->
+    <script src="db/fantasyPros.js"></script>
+    <script src="db/ffCalc.js"></script>
+    <!-- vendor libraries -->
+    <Script src="https://d3js.org/d3.v3.min.js"></Script>
+    <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.3.1/jquery.min.js"></script>
+
+    <style>
+        body {background:#fff; margin:0}
+        #controls {width: 40%; float:right; text-align:center;}
+        #playerTable {width:60%; float:left; margin-bottom:40px;}
+        .floatingFooter {background:#222; color:#fff; position:fixed; bottom:0; width:100%; padding:10px; text-align:center; font-weight:bold}
+        table {font-size:12px;}
+        tr {}
+        thead {font-size:1.2em;}
+        td, th {text-align:center; padding:2px}
+        .hidden {display:none}
+        .selected {display:none}
+        .RB td, .positionButton.RB {background:#cff}
+        .QB td, .positionButton.QB {background:#ccf}
+        .WR td, .positionButton.WR {background:#fcc}
+        .PK td, .positionButton.PK {background:#ffc}
+        .TE td, .positionButton.TE {background:#cfc}
+        .DEF td, .positionButton.DEF {background:#fcf}
+        #pickRB {color:#cff}
+        #pickQB {color:#ccf}
+        #pickWR {color:#fcc}
+        #pickPK {color:#ffc}
+        #pickTE {color:#cfc}
+        #pickDEF {color:#fcf}
+        .positionButton.depressed {background:#ddd}
+        .byPosition {margin:auto; width:40%; position:fixed;}
+        .myTeam {border-top:1px solid #d1d1d1; margin:20px auto 0; height:466px; overflow-y:scroll; overflow-x:hidden; padding:20px 0; width:40%; top:40px; position:fixed;}
+        .myTeam h3 {margin: 0 auto;}
+        #byeWeeks {position:fixed; bottom:38px; width:40%; background:#d1d1d1; padding-top:10px;}
+        #byeWeeks svg {background:#fafafa}
+        .minorNotice {font-weight:bold}
+        .majorNotice {font-weight:bold; font-size:1.2em; text-decoration:underline;}
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="col">
+        <table id="playerTable" cellpadding="0" cellspacing="0">
+            <thead>
+                <tr>
+                    <th>ADP</th>
+                    <th>Low|Hi|Diff</th>
+                    <th>Player</th>
+                    <th>Position</th>
+                    <th>Team</th>
+                    <th>Bye Week</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+    </div>
+    <div id="controls" class="container col">
+        <div class="byPosition">
+            <span>Isolate By Position</span><br />
+            <button onclick="isolatePosition('rb', event)" class="positionButton RB">RB</button>
+            <button onclick="isolatePosition('qb', event)" class="positionButton QB">QB</button>
+            <button onclick="isolatePosition('wr', event)" class="positionButton WR">WR</button>
+            <button onclick="isolatePosition('te', event)" class="positionButton TE">TE</button>
+            <button onclick="isolatePosition('def', event)" class="positionButton DEF">DEF</button>
+            <button onclick="isolatePosition('pk', event)" class="positionButton PK">PK</button>
+        </div>
+        <div class="myTeam">
+            <h3>My Team</h3>
+            <table id="myPlayers" cellpadding="0" cellspacing="0" style="width:90%; margin:auto">
+                <thead>
+                <tr>
+                    <th>DP</th>
+                    <th>Low|Hi|Diff</th>
+                    <th>Player</th>
+                    <th>Position</th>
+                    <th>Team</th>
+                    <th>Bye Week</th>
+                </tr>
+                </thead>
+                <tbody></tbody>
+            </table>
+        </div>
+        <div id="byeWeeks">
+            <strong>Bye Week Chart</strong><br />
+            <svg width="396" height="162"></svg>
+        </div>
+    </div>
+</div>
+<div class="floatingFooter">
+    Pick Counter - Total: <span id="pickTotal">0</span> || QB: <span id="pickQB">0</span> - RB: <span id="pickRB">0</span> - WR: <span id="pickWR">0</span> - TE: <span id="pickTE">0</span> - DEF: <span id="pickDEF">0</span> - PK: <span id="pickPK">0</span>
+</div>
+</body>
+
+
+<script>
+//    console.log(fantasyProsDB);
+
+// ffCalc schema sample:
+// {"name": "Todd Gurley", "multi_adp": 1.1, "adp": 1.6, "times_drafted": 855, "team": "LAR", "high": 1, "low": 6, "adp_formatted": "1.02", "player_id": 2280, "position": "RB", "bye": 12, "stdev": 0.8, "multiple": []},
+var positions = [
+    {"label": "QB", "color": "#ccf"},
+    {"label": "WR", "color": "#fcc"},
+    {"label": "RB", "color": "#cff"},
+    {"label": "PK", "color": "#ffc"},
+    {"label": "TE", "color": "#cfc"},
+    {"label": "DEF", "color": "#fcf"}];
+var list = [];
+var indDbs = [ffCalc, fantasyProsDB];
+var byeWeeks = [];
+combineLists(indDbs, function(combinedDb){
+    buildTable(combinedDb);
+});
+
+
+function buildTable(playerList){
+    d3.select('#playerTable tbody')
+        .selectAll("tr")
+        .data(playerList)
+        .enter()
+        .append("tr")
+        .attr("class", function(d, i){
+            return d.position;
+        })
+        .html(function(d, i){
+            var str = "<td>"+d.multi_adp+"</td><td>"+d.lo_adp+" | "+d.hi_adp+" | <span";
+                if (d.hi_adp - d.lo_adp > 30){
+                    str += " class='majorNotice'"
+                } else if (d.hi_adp - d.lo_adp > 10){
+                    str += " class='minorNotice'"
+                }
+                str += ">"+(d.hi_adp - d.lo_adp).toFixed(1)+"</span></td>";
+                str += "<td>"+d.name+"</td><td>"+d.position+"</td><td>"+d.team+"</td><td>"+d.bye+"</td>";
+                str += "<td><button onclick='taken(event)'>Taken</button> <button onclick='mine(event)'>My Team</button></td>";
+
+            return str;
+        });
+}
+
+function combineLists(db, cb){
+    // inc db => [ffCalc, fantasyProsDB]
+    if (db.length == 1){
+        return cb(db[0]);
+    } else {
+        // use db[0] as the default schema - match other incoming arrays to it.
+        for (var d = 1; d < db.length; d++){
+            for (var x = 0; x < db[d].length; x++) {
+                for (var i = 0; i < db[0].length; i++) {
+                    if (db[0][i].name == db[d][x].name) {
+                        // we have a match, mesh them.
+                        if (!db[0][i].multiple) {
+                            db[0][i].multiple = [db[d][x].adp];
+                        } else {
+                            db[0][i].multiple.push(db[d][x].adp);
+                        }
+                    }
+                }
+            }
+        }
+        for (var i = 0; i < db[0].length; i++){
+            if (!db[0][i].multiple){
+                db[0][i].multiple = [db[0][i].adp];
+            }
+            db[0][i].multiple.push(db[0][i].adp);
+            var newAdp = 0;
+            for (var d = 0; d < db[0][i].multiple.length; d++){
+                newAdp += db[0][i].multiple[d];
+            }
+            db[0][i].multi_adp = (newAdp / db[0][i].multiple.length).toFixed(1);
+            db[0][i].hi_adp = 0;
+            db[0][i].lo_adp = 1000;
+        }
+
+        for (var i = 0; i < db[0].length; i++){
+            if (db[0][i].multiple){
+                for (var m = 0; m < db[0][i].multiple.length; m++){
+                    if (db[0][i].multiple[m] > db[0][i].hi_adp){
+                        db[0][i].hi_adp = db[0][i].multiple[m];
+                    }
+                    if (db[0][i].multiple[m] < db[0][i].lo_adp){
+                        db[0][i].lo_adp = db[0][i].multiple[m];
+                    }
+                }
+            }
+        }
+
+        db[0].sort(function(a,b){
+            return parseFloat(a.multi_adp) - parseFloat(b.multi_adp);
+        });
+        return cb(db[0]);
+    }
+}
+
+function isolatePosition(cls, ev) {
+    if ($(ev.target).hasClass('depressed')){
+        $(ev.target).removeClass('depressed');
+        $("table td").removeClass("hidden");
+    } else {
+        $(".byPosition button").removeClass('depressed');
+        $(ev.target).addClass('depressed');
+        $("table td").addClass("hidden");
+        $("table ."+cls.toUpperCase()+" td").removeClass("hidden");
+    }
+}
+
+function taken(ev){
+    $(ev.target).parent().parent().addClass("selected");
+    var pos = "";
+    for (var p = 0; p < positions.length; p++){
+        if ($(ev.target).parent().parent().hasClass(positions[p].label)){
+            pos = positions[p].label;
+        }
+    }
+    updateTotals(pos);
+}
+
+function mine(ev){
+    // mark as selected in #playerTable
+    // create a copy and append to tbody as new line in #myPlayers
+    var row = $(ev.target).parent().parent();
+    $(row).addClass("selected");
+    var newRow = row;
+    $(newRow).removeClass("selected");
+    // get position
+    var pos = {}, posCount = 1;
+    for (var p = 0; p < positions.length; p++){
+        if ($(newRow).hasClass(positions[p].label)){
+            pos = positions[p];
+        }
+    }
+    updateTotals(pos.label);
+    // get myPlayers table
+    var myPlayers = $("#myPlayers");
+    var myPlayerRows = $(myPlayers).find("tbody").find("tr");
+    for (var mpr = 0; mpr < myPlayerRows.length; mpr++){ // checking for rows that already set for the selected position
+        if ($(myPlayerRows[mpr]).hasClass(pos.label)){
+            posCount++;
+        }
+    }
+    // apply the draft position
+    $(newRow).children().eq(0).text(myPlayerRows.length+1);
+    // apply the # after position
+    $(newRow).children().eq(3).text($(newRow).children().eq(3).text()+posCount);
+    // remove the actions td
+    $(newRow).children().eq(6).remove();
+    $(myPlayers).find("tbody").append(newRow);
+    var bye = {"weekNo": $(newRow).children().eq(5).text(), "color": pos.color};
+    byeWeeks.push(bye);
+    rebuildByeGraph();
+}
+
+function rebuildByeGraph(){
+    var cols = [
+        {"week": 4, "x": 0, "count": 0},
+        {"week": 5, "x": 44, "count": 0},
+        {"week": 6, "x": 88, "count": 0},
+        {"week": 7, "x": 132, "count": 0},
+        {"week": 8, "x": 176, "count": 0},
+        {"week": 9, "x": 220, "count": 0},
+        {"week": 10, "x": 264, "count": 0},
+        {"week": 11, "x": 308, "count": 0},
+        {"week": 12, "x": 352, "count": 0}
+    ];
+    var width = 396;
+    console.log(byeWeeks);
+    for (var b = 0; b < byeWeeks.length; b++){
+        for (var c = 0; c < cols.length; c++){
+            if (cols[c].week == parseInt(byeWeeks[b].weekNo)){
+                cols[c].count++;
+                byeWeeks[b].x = cols[c].x;
+                byeWeeks[b].y = cols[c].count * 20;
+            }
+        }
+    }
+    // first process each element from byeWeeks into the data array with locations
+    for (var i = 0; i < byeWeeks.length; i++){
+
+    }
+
+    // unset the previous graph
+    $('#byeWeeks svg').html("");
+
+    // re-build the graph
+    var svgContainer = d3.select('#byeWeeks svg');
+
+    // draw rectangles.
+    var rect = svgContainer.selectAll("rect")
+        .data(byeWeeks)
+        .enter()
+        .append("rect")
+        .style("fill", function(d, i){
+            return d.color;
+        })
+        .attr("x", function(d, i){
+            return d.x;
+        })
+        .attr("y", function(d, i){
+            return 150 - d.y;
+        })
+        .attr("width", 44)
+        .attr("height", 20);
+
+    // draw labels
+    var text = svgContainer.selectAll("text")
+        .data(cols)
+        .enter()
+        .append("text");
+
+    var textOffset = 14;
+    var textLabels = text
+        .attr("x", function(d){
+            return d.x + textOffset;
+        })
+        .attr("y", 161)
+        .text(function(d){
+            return d.week
+        })
+        .attr("font-family", "sans-serif")
+        .attr("font-size", "12px")
+        .attr("fill", "#333");
+
+}
+
+function updateTotals(pos){
+    $("#pick"+pos).text(parseInt($("#pick"+pos).text())+1);
+    $("#pickTotal").text(parseInt($("#pickTotal").text())+1);
+}
+
+
+</script>
+</html>
